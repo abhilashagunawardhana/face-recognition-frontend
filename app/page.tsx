@@ -1,103 +1,267 @@
-import Image from "next/image";
+"use client"
+
+import { useState, useEffect, useRef } from "react"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Lock, Unlock, Wifi, WifiOff, Camera } from "lucide-react"
+import ImageDisplay from "../components/image-display"
+import WebSocketManager from "../components/websocket-manager"
+import DoorControl from "../components/door-control"
+import type { CapturedImage } from "../types/image"
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [isConnected, setIsConnected] = useState(false)
+  const [images, setImages] = useState<CapturedImage[]>([])
+  const [isDoorLocked, setIsDoorLocked] = useState(true)
+  const wsRef = useRef<WebSocket | null>(null)
+  const [wsUrl, setWsUrl] = useState<string>("")
+  const [isPreview, setIsPreview] = useState(true)
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Sample images for preview mode
+  const sampleImages: CapturedImage[] = [
+    {
+      id: "1",
+      imageData: "/diverse-person-faces.png",
+      timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+    },
+    {
+      id: "2",
+      imageData: "/serene-woman.png",
+      timestamp: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+    },
+    {
+      id: "3",
+      imageData: "/man-face.png",
+      timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+    },
+  ]
+
+  useEffect(() => {
+    // Check if we're in a preview environment
+    const isPreviewEnv =
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" ||
+        window.location.hostname.includes("vercel.app") ||
+        window.location.hostname.includes("v0.dev"))
+
+    setIsPreview(isPreviewEnv)
+
+    // Use sample data in preview mode
+    if (isPreviewEnv) {
+      console.log("Running in preview mode with sample data")
+      setImages(sampleImages)
+      return // Don't attempt WebSocket connection in preview mode
+    }
+
+    // In production, use the actual WebSocket connection
+    // We'll use a valid WebSocket URL format as a placeholder
+    // This should be replaced with the actual Arduino WebSocket server address in production
+    const serverUrl = "ws://localhost:8080"
+    setWsUrl(serverUrl)
+
+    let ws: WebSocket | null = null
+
+    try {
+      ws = new WebSocket(serverUrl)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        console.log("WebSocket connection established")
+        setIsConnected(true)
+      }
+
+      ws.onclose = () => {
+        console.log("WebSocket connection closed")
+        setIsConnected(false)
+
+        // Attempt to reconnect after 5 seconds
+        setTimeout(() => {
+          console.log("Attempting to reconnect...")
+          try {
+            if (wsRef.current) {
+              const newWs = new WebSocket(serverUrl)
+              wsRef.current = newWs
+            }
+          } catch (error) {
+            console.error("Failed to reconnect:", error)
+          }
+        }, 5000)
+      }
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error)
+        setIsConnected(false)
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+
+          // Handle different message types
+          if (data.type === "image") {
+            // Add new image to the beginning of the array (newest first)
+            const newImage: CapturedImage = {
+              id: Date.now().toString(),
+              imageData: data.imageData, // Base64 encoded image
+              timestamp: data.timestamp || new Date().toISOString(),
+            }
+
+            setImages((prevImages) => [newImage, ...prevImages])
+          } else if (data.type === "doorStatus") {
+            setIsDoorLocked(data.locked)
+          }
+        } catch (error) {
+          console.error("Error processing WebSocket message:", error)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to create WebSocket connection:", error)
+      // Use sample data as fallback
+      setImages(sampleImages)
+    }
+
+    // Clean up WebSocket connection on component unmount
+    return () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close()
+      }
+    }
+  }, [])
+
+  const handleDoorControl = () => {
+    if (isPreview) {
+      // In preview mode, just toggle the state locally
+      setIsDoorLocked(!isDoorLocked)
+      return
+    }
+
+    // Check if WebSocket is available and connected
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        // Send door control command to Arduino
+        wsRef.current.send(
+          JSON.stringify({
+            type: "doorControl",
+            action: isDoorLocked ? "unlock" : "lock",
+          }),
+        )
+      } catch (error) {
+        console.error("Error sending door control command:", error)
+        // Fallback: toggle state locally if sending fails
+        setIsDoorLocked(!isDoorLocked)
+      }
+    } else {
+      console.warn("WebSocket not connected, toggling door state locally")
+      // Fallback: toggle state locally if WebSocket is not connected
+      setIsDoorLocked(!isDoorLocked)
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Face Recognition System</h1>
+              <p className="text-muted-foreground mt-1">Real-time monitoring and door control</p>
+              {isPreview && (
+                <Badge variant="outline" className="mt-2">
+                  Preview Mode - Using Sample Data
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Badge variant={isConnected || isPreview ? "default" : "destructive"} className="px-3 py-1">
+                {isConnected || isPreview ? (
+                  <>
+                    <Wifi className="h-4 w-4 mr-1" /> Connected
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-4 w-4 mr-1" /> Disconnected
+                  </>
+                )}
+              </Badge>
+
+              <Badge variant={isDoorLocked ? "outline" : "default"} className="px-3 py-1">
+                {isDoorLocked ? (
+                  <>
+                    <Lock className="h-4 w-4 mr-1" /> Locked
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="h-4 w-4 mr-1" /> Unlocked
+                  </>
+                )}
+              </Badge>
+            </div>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Door Control Panel */}
+          <Card className="lg:col-span-1">
+            <CardContent className="p-6">
+              <DoorControl
+                isLocked={isDoorLocked}
+                isConnected={isConnected || isPreview}
+                onToggle={handleDoorControl}
+                isPreview={isPreview}
+              />
+            </CardContent>
+          </Card>
+
+          {/* WebSocket Status and Connection Manager */}
+          <Card className="lg:col-span-2">
+            <CardContent className="p-6">
+              <WebSocketManager
+                isConnected={isConnected || isPreview}
+                url={wsUrl || "Not connected in preview mode"}
+                onReconnect={() => {
+                  if (isPreview) return
+
+                  if (wsRef.current) {
+                    wsRef.current.close()
+                    try {
+                      const newWs = new WebSocket(wsUrl)
+                      wsRef.current = newWs
+                    } catch (error) {
+                      console.error("Failed to reconnect:", error)
+                    }
+                  }
+                }}
+                isPreview={isPreview}
+              />
+            </CardContent>
+          </Card>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+
+        {/* Image Display Section */}
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-semibold flex items-center">
+              <Camera className="mr-2 h-5 w-5" /> Captured Images
+            </h2>
+            <Badge variant="secondary" className="px-3 py-1">
+              {images.length} {images.length === 1 ? "image" : "images"}
+            </Badge>
+          </div>
+
+          {images.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <ImageDisplay images={images} />
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-gray-100 rounded-lg">
+              <Camera className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-medium">No images captured yet</h3>
+              <p className="mt-1 text-sm text-gray-500">Images will appear here when the system detects faces</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  )
 }
