@@ -1,21 +1,23 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Lock, Unlock, Wifi, WifiOff, Camera } from "lucide-react"
-import ImageDisplay from "../components/image-display"
-import WebSocketManager from "../components/websocket-manager"
-import DoorControl from "../components/door-control"
-import type { CapturedImage } from "../types/image"
+import { Lock, Unlock, Wifi, WifiOff, Camera, RefreshCw } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import ImageDisplay from "@/components/image-display"
+import DoorControl from "@/components/door-control"
+import type { CapturedImage } from "@/types/image"
 
 export default function Home() {
-  const [isConnected, setIsConnected] = useState(false)
+  const [isConnected, setIsConnected] = useState(true)
   const [images, setImages] = useState<CapturedImage[]>([])
   const [isDoorLocked, setIsDoorLocked] = useState(true)
-  const wsRef = useRef<WebSocket | null>(null)
-  const [wsUrl, setWsUrl] = useState<string>("")
+  const [isLoading, setIsLoading] = useState(false)
   const [isPreview, setIsPreview] = useState(true)
+
+  // Backend API URL - replace with your Flask server address
+  const API_URL = "http://192.168.89.2:5000"
 
   // Sample images for preview mode
   const sampleImages: CapturedImage[] = [
@@ -23,18 +25,108 @@ export default function Home() {
       id: "1",
       imageData: "/diverse-person-faces.png",
       timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+      name: "Melanka",
     },
     {
       id: "2",
       imageData: "/serene-woman.png",
       timestamp: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+      name: "Unknown",
     },
     {
       id: "3",
       imageData: "/man-face.png",
       timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+      name: "Melanka",
     },
   ]
+
+  // Function to fetch images from the backend
+  const fetchImages = async () => {
+    if (isPreview) {
+      setImages(sampleImages)
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      // This endpoint doesn't exist in your current backend
+      // You'll need to add it later without modifying existing code
+      const response = await fetch(`${API_URL}/images`)
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      // Transform the data to match our CapturedImage type
+      const formattedImages: CapturedImage[] = data.images.map((img: any) => ({
+        id: img.filename,
+        imageData: `${API_URL}/uploads/${img.filename}`,
+        timestamp: img.timestamp || new Date().toISOString(),
+        name: img.name || extractNameFromFilename(img.filename),
+      }))
+
+      setImages(formattedImages)
+      setIsConnected(true)
+    } catch (error) {
+      console.error("Failed to fetch images:", error)
+      setIsConnected(false)
+
+      // In case of error, use sample data in development
+      if (process.env.NODE_ENV === "development") {
+        setImages(sampleImages)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Extract name from filename (e.g., "detected_face_Melanka_20230515_123456.jpg")
+  const extractNameFromFilename = (filename: string): string => {
+    if (filename.includes("detected_face_")) {
+      const parts = filename.split("_")
+      if (parts.length >= 3) {
+        return parts[2] // This should be the name part
+      }
+    }
+    return "Unknown"
+  }
+
+  // Function to control the door
+  const handleDoorControl = async () => {
+    if (isPreview) {
+      // In preview mode, just toggle the state locally
+      setIsDoorLocked(!isDoorLocked)
+      return
+    }
+
+    try {
+      // This endpoint doesn't exist in your current backend
+      // You'll need to add it later without modifying existing code
+      const response = await fetch(`${API_URL}/door-control`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: isDoorLocked ? "unlock" : "lock",
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
+
+      // Toggle door state on successful response
+      setIsDoorLocked(!isDoorLocked)
+    } catch (error) {
+      console.error("Failed to control door:", error)
+      // Fallback: toggle state locally if API call fails
+      setIsDoorLocked(!isDoorLocked)
+    }
+  }
 
   useEffect(() => {
     // Check if we're in a preview environment
@@ -46,116 +138,18 @@ export default function Home() {
 
     setIsPreview(isPreviewEnv)
 
-    // Use sample data in preview mode
-    if (isPreviewEnv) {
-      console.log("Running in preview mode with sample data")
-      setImages(sampleImages)
-      return // Don't attempt WebSocket connection in preview mode
-    }
+    // Initial fetch
+    fetchImages()
 
-    // In production, use the actual WebSocket connection
-    // We'll use a valid WebSocket URL format as a placeholder
-    // This should be replaced with the actual Arduino WebSocket server address in production
-    const serverUrl = "ws://localhost:8080"
-    setWsUrl(serverUrl)
+    // Set up polling for new images (every 5 seconds)
+    // This is a workaround since we're not modifying the backend to add WebSockets
+    const intervalId = setInterval(() => {
+      fetchImages()
+    }, 5000)
 
-    let ws: WebSocket | null = null
-
-    try {
-      ws = new WebSocket(serverUrl)
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        console.log("WebSocket connection established")
-        setIsConnected(true)
-      }
-
-      ws.onclose = () => {
-        console.log("WebSocket connection closed")
-        setIsConnected(false)
-
-        // Attempt to reconnect after 5 seconds
-        setTimeout(() => {
-          console.log("Attempting to reconnect...")
-          try {
-            if (wsRef.current) {
-              const newWs = new WebSocket(serverUrl)
-              wsRef.current = newWs
-            }
-          } catch (error) {
-            console.error("Failed to reconnect:", error)
-          }
-        }, 5000)
-      }
-
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error)
-        setIsConnected(false)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-
-          // Handle different message types
-          if (data.type === "image") {
-            // Add new image to the beginning of the array (newest first)
-            const newImage: CapturedImage = {
-              id: Date.now().toString(),
-              imageData: data.imageData, // Base64 encoded image
-              timestamp: data.timestamp || new Date().toISOString(),
-            }
-
-            setImages((prevImages) => [newImage, ...prevImages])
-          } else if (data.type === "doorStatus") {
-            setIsDoorLocked(data.locked)
-          }
-        } catch (error) {
-          console.error("Error processing WebSocket message:", error)
-        }
-      }
-    } catch (error) {
-      console.error("Failed to create WebSocket connection:", error)
-      // Use sample data as fallback
-      setImages(sampleImages)
-    }
-
-    // Clean up WebSocket connection on component unmount
-    return () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close()
-      }
-    }
+    // Clean up interval on component unmount
+    return () => clearInterval(intervalId)
   }, [])
-
-  const handleDoorControl = () => {
-    if (isPreview) {
-      // In preview mode, just toggle the state locally
-      setIsDoorLocked(!isDoorLocked)
-      return
-    }
-
-    // Check if WebSocket is available and connected
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        // Send door control command to Arduino
-        wsRef.current.send(
-          JSON.stringify({
-            type: "doorControl",
-            action: isDoorLocked ? "unlock" : "lock",
-          }),
-        )
-      } catch (error) {
-        console.error("Error sending door control command:", error)
-        // Fallback: toggle state locally if sending fails
-        setIsDoorLocked(!isDoorLocked)
-      }
-    } else {
-      console.warn("WebSocket not connected, toggling door state locally")
-      // Fallback: toggle state locally if WebSocket is not connected
-      setIsDoorLocked(!isDoorLocked)
-    }
-  }
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
@@ -173,8 +167,8 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Badge variant={isConnected || isPreview ? "default" : "destructive"} className="px-3 py-1">
-                {isConnected || isPreview ? (
+              <Badge variant={isConnected ? "default" : "destructive"} className="px-3 py-1">
+                {isConnected ? (
                   <>
                     <Wifi className="h-4 w-4 mr-1" /> Connected
                   </>
@@ -196,6 +190,10 @@ export default function Home() {
                   </>
                 )}
               </Badge>
+
+              <Button variant="outline" size="icon" onClick={fetchImages} disabled={isLoading}>
+                <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+              </Button>
             </div>
           </div>
         </header>
@@ -206,34 +204,52 @@ export default function Home() {
             <CardContent className="p-6">
               <DoorControl
                 isLocked={isDoorLocked}
-                isConnected={isConnected || isPreview}
+                isConnected={isConnected}
                 onToggle={handleDoorControl}
                 isPreview={isPreview}
               />
             </CardContent>
           </Card>
 
-          {/* WebSocket Status and Connection Manager */}
+          {/* Backend Status */}
           <Card className="lg:col-span-2">
             <CardContent className="p-6">
-              <WebSocketManager
-                isConnected={isConnected || isPreview}
-                url={wsUrl || "Not connected in preview mode"}
-                onReconnect={() => {
-                  if (isPreview) return
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold">Backend Status</h2>
+                  <Badge variant={isConnected ? "default" : "destructive"} className="px-3 py-1">
+                    {isConnected ? "Connected" : "Disconnected"}
+                  </Badge>
+                </div>
 
-                  if (wsRef.current) {
-                    wsRef.current.close()
-                    try {
-                      const newWs = new WebSocket(wsUrl)
-                      wsRef.current = newWs
-                    } catch (error) {
-                      console.error("Failed to reconnect:", error)
-                    }
-                  }
-                }}
-                isPreview={isPreview}
-              />
+                <div className="p-4 bg-gray-50 rounded-md border">
+                  <h3 className="text-sm font-medium mb-2">Flask Server</h3>
+                  <code className="text-xs bg-gray-100 p-2 rounded block overflow-x-auto">{API_URL}</code>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {isPreview
+                      ? "In production, replace this with your Flask server address."
+                      : "This is the address of your Flask server. Make sure it's accessible from this device."}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-yellow-50 rounded-md border border-yellow-200">
+                  <h3 className="text-sm font-medium mb-2 text-yellow-800">Required Backend Endpoints</h3>
+                  <p className="text-xs text-yellow-700">
+                    Your current backend needs these additional endpoints (to be added later):
+                  </p>
+                  <ul className="text-xs text-yellow-700 list-disc list-inside mt-2 space-y-1">
+                    <li>
+                      <code>/images</code> - GET endpoint to list all captured images
+                    </li>
+                    <li>
+                      <code>/uploads/{"{filename}"}</code> - GET endpoint to serve image files
+                    </li>
+                    <li>
+                      <code>/door-control</code> - POST endpoint to control the door lock
+                    </li>
+                  </ul>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -242,14 +258,19 @@ export default function Home() {
         <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-semibold flex items-center">
-              <Camera className="mr-2 h-5 w-5" /> Captured Images
+              <Camera className="mr-2 h-5 w-5" /> Captured Faces
             </h2>
             <Badge variant="secondary" className="px-3 py-1">
               {images.length} {images.length === 1 ? "image" : "images"}
             </Badge>
           </div>
 
-          {images.length > 0 ? (
+          {isLoading && images.length === 0 ? (
+            <div className="text-center py-12 bg-gray-100 rounded-lg">
+              <RefreshCw className="mx-auto h-12 w-12 text-gray-400 animate-spin" />
+              <h3 className="mt-4 text-lg font-medium">Loading images...</h3>
+            </div>
+          ) : images.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <ImageDisplay images={images} />
             </div>

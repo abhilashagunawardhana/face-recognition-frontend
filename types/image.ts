@@ -1,5 +1,6 @@
 export interface CapturedImage {
   id: string
-  imageData: string // Base64 encoded image
+  imageData: string // URL or Base64 encoded image
   timestamp: string
+  name?: string // Name of the recognized person
 }

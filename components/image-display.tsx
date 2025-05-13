@@ -3,7 +3,8 @@
 import { useState } from "react"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Calendar, Clock, Maximize2, Download } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Calendar, Clock, Maximize2, Download, User } from "lucide-react"
 import type { CapturedImage } from "@/types/image"
 
 interface ImageDisplayProps {
@@ -81,6 +82,16 @@ export default function ImageDisplay({ images }: ImageDisplayProps) {
               >
                 <Maximize2 className="h-4 w-4" />
               </Button>
+
+              {/* Recognition badge */}
+              <Badge
+                className={`absolute bottom-2 left-2 ${
+                  image.name === "Unknown" ? "bg-yellow-500" : image.name === "Melanka" ? "bg-green-500" : "bg-blue-500"
+                }`}
+              >
+                <User className="h-3 w-3 mr-1" />
+                {image.name || "Unknown"}
+              </Badge>
             </div>
           </CardContent>
           <CardFooter className="p-3 flex flex-col items-start">
@@ -133,11 +144,26 @@ export default function ImageDisplay({ images }: ImageDisplayProps) {
               </Button>
             </div>
             <div className="p-4">
-              <p className="text-sm text-muted-foreground">
-                Captured on{" "}
-                {expandedImage && formatDate(images.find((img) => img.id === expandedImage)?.timestamp || "")} at{" "}
-                {expandedImage && formatTime(images.find((img) => img.id === expandedImage)?.timestamp || "")}
-              </p>
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">
+                  Captured on{" "}
+                  {expandedImage && formatDate(images.find((img) => img.id === expandedImage)?.timestamp || "")} at{" "}
+                  {expandedImage && formatTime(images.find((img) => img.id === expandedImage)?.timestamp || "")}
+                </p>
+
+                <Badge
+                  className={`${
+                    expandedImage && images.find((img) => img.id === expandedImage)?.name === "Unknown"
+                      ? "bg-yellow-500"
+                      : expandedImage && images.find((img) => img.id === expandedImage)?.name === "Melanka"
+                        ? "bg-green-500"
+                        : "bg-blue-500"
+                  }`}
+                >
+                  <User className="h-3 w-3 mr-1" />
+                  {expandedImage && (images.find((img) => img.id === expandedImage)?.name || "Unknown")}
+                </Badge>
+              </div>
             </div>
           </div>
         </div>
